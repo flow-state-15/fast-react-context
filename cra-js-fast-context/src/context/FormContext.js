@@ -1,79 +1,69 @@
 import React, {
-  useContext,
-  createContext,
-  useState,
-  useEffect,
-  useRef,
-  useCallback,
-  useSyncExternalStore,
+	useContext,
+	createContext,
+	useState,
+	useEffect,
+	useRef,
+	useCallback,
+	useSyncExternalStore,
 } from "react";
 
 export const FormContext = createContext(null);
 
-const useStoreData = (initialState) => {
-  if (!(initialState instanceof Object))
-    throw new Error("initial state must be an object");
+const useCreateStore = (initialState) => {
+	if (!(initialState instanceof Object))
+		throw new Error("initial state must be an object");
 
-  const store = useRef(initialState);
+	const store = useRef(initialState);
+	const subscriberList = useRef(new Set());
 
-  const get = useCallback(() => store.current, []);
+	const getState = useCallback(() => store.current, []);
 
-  const set = useCallback((val) => {
-    console.log("invoking setter, val: ", val);
-    const slice = Object.keys(val)[0];
-    // if (store.current[slice] === val[slice])
-    store.current = { ...store.current, ...val };
-    console.log(store.current);
-    broadcast(store.current, Object.keys(val)[0], val);
-  }, []);
+	const dispatch = useCallback((val) => {
+		store.current = { ...store.current, ...val };
+		broadcast(store.current);
+	}, []);
 
-  const subscriberList = useRef(new Set());
+	const broadcast = (store) => {
+		subscriberList.current.forEach((fn) => fn(store));
+	};
 
-  const subscribe = useCallback((fn, slice) => {
-    subscriberList.current.add(fn);
-    console.log("ran subscriber, subList: ", subscriberList.current);
-    return () => subscriberList.current.delete(fn);
-  }, []);
+	const subscribe = useCallback((fn) => {
+		subscriberList.current.add(fn);
+		return () => subscriberList.current.delete(fn);
+	}, []);
 
-  const broadcast = (store, key, val) => {
-    subscriberList.current.forEach((fn) => {
-      console.log("invoking subscriber");
-      fn(store, key, val);
-    });
-  };
-
-  return { get, set, subscribe };
+	return { getState, dispatch, subscribe };
 };
 
-export const useFormStore = (selector, slice) => {
-  const store = useContext(FormContext);
-  //    react 18 hook:
-  //   const state = useSyncExternalStore(store.subscribe, () =>
-  //     selector(store.get())
-  //   );
-  const [state17, setState17] = useState(selector(store.get()));
+export const useStore = (selector) => {
+	const store = useContext(FormContext);
+	const [, setState] = useState(selector(store.getState()));
 
-  // custom selector if you aren't on React 18
-  const stableSelector = useCallback((setter, slice, val, store) => {
-    console.log("stable selector");
-    return (store, val, slice) => {
-        console.log('invoking setter')
-        setter(selector(store))
-    };
-  }, []);
+	//   react 18 hook to replace stableSelector:
+	//   const state = useSyncExternalStore(store.subscribe, () =>
+	//     selector(store.get())
+	//   );
 
-  useEffect(() => {
-    return store.subscribe(stableSelector(setState17));
-  }, []);
+	const stableSelector = useCallback(
+		(setter) => (store) => setter(selector(store)),
+		[]
+	);
 
-  return [state17, store.set];
+	useEffect(() => {
+		return store.subscribe(stableSelector(setState));
+	}, []);
+
+	return [selector(store.getState()), store.dispatch];
 };
 
-export default function FormProvider(props) {
-  const initialState = { first: "", last: "" };
-  return (
-    <FormContext.Provider value={useStoreData(initialState)}>
-      {props.children}
-    </FormContext.Provider>
-  );
+//  generic context provider
+export default function Provider(props) {
+	const initialState = { first: "", last: "" };
+	const store = useCreateStore(initialState);
+	return (
+		<FormContext.Provider value={store}>
+			{props.children}
+		</FormContext.Provider>
+	);
 }
